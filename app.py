@@ -4,8 +4,10 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 from ml_core import (
+    get_data_quality_report,
     prepare_data,
     train_model,
+    train_and_compare_models,
     evaluate_model,
     get_feature_importance,
     save_model,
@@ -74,7 +76,45 @@ if df is not None:
     st.write("数据维度：")
     st.write(f"共 {df.shape[0]} 行，{df.shape[1]} 列")
 
-    st.header("3. 故障样本分布")
+    st.header("3. 数据质量分析")
+
+    quality_report = get_data_quality_report(df)
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("数据行数", quality_report["shape"][0])
+    col2.metric("数据列数", quality_report["shape"][1])
+
+    if quality_report["failure_rate"] is not None:
+        col3.metric("故障样本占比", f"{quality_report['failure_rate']:.2%}")
+    else:
+        col3.metric("故障样本占比", "N/A")
+
+    st.subheader("字段名称和字段类型")
+    dtype_df = pd.DataFrame(
+        quality_report["dtypes"].items(),
+        columns=["字段名称", "字段类型"]
+    )
+    st.dataframe(dtype_df)
+
+    st.subheader("每列缺失值数量")
+    missing_df = pd.DataFrame(
+        quality_report["missing_values"].items(),
+        columns=["字段名称", "缺失值数量"]
+    )
+    st.dataframe(missing_df)
+
+    if quality_report["target_distribution"]:
+        st.subheader("Machine failure 类别分布")
+        target_distribution_df = pd.DataFrame(
+            quality_report["target_distribution"].items(),
+            columns=["Machine failure", "样本数量"]
+        )
+        st.dataframe(target_distribution_df)
+        st.bar_chart(target_distribution_df.set_index("Machine failure")["样本数量"])
+    else:
+        st.warning("数据中没有找到目标字段：Machine failure")
+
+    st.header("4. 故障样本分布")
 
     if "Machine failure" in df.columns:
         failure_counts = df["Machine failure"].value_counts().sort_index()
@@ -96,10 +136,10 @@ if df is not None:
     else:
         st.error("数据中没有找到目标字段：Machine failure")
 
-    st.header("4. 模型训练与评估")
+    st.header("5. 模型训练与评估")
 
     st.markdown("""
-    点击下方按钮后，系统会完成数据预处理、随机森林模型训练、模型评估和模型保存。
+    点击下方按钮后，系统会完成数据预处理、多模型对比、随机森林模型训练、模型评估和模型保存。
     """)
 
     if st.button("训练随机森林模型"):
@@ -117,6 +157,24 @@ if df is not None:
             col2.write("测试集大小：")
             col2.write(f"X_test: {X_test.shape}, y_test: {y_test.shape}")
 
+            with st.spinner("正在训练并对比多个模型..."):
+                model_comparison_df = train_and_compare_models(
+                    X_train,
+                    X_test,
+                    y_train,
+                    y_test
+                )
+
+            st.subheader("多模型评估结果")
+            st.dataframe(
+                model_comparison_df.style.format({
+                    "Accuracy": "{:.4f}",
+                    "Precision": "{:.4f}",
+                    "Recall": "{:.4f}",
+                    "F1-score": "{:.4f}",
+                })
+            )
+
             with st.spinner("正在训练随机森林模型..."):
                 model = train_model(X_train, y_train)
 
@@ -130,7 +188,7 @@ if df is not None:
             with st.spinner("正在评估模型..."):
                 metrics, report, cm, y_pred = evaluate_model(model, X_test, y_test)
 
-            st.header("5. 模型评估指标")
+            st.header("6. Random Forest 最终模型评估指标")
 
             col1, col2, col3, col4 = st.columns(4)
 
@@ -186,7 +244,7 @@ if df is not None:
             st.code(str(e))
 
 
-st.header("6. 单条设备故障预测")
+st.header("7. 单条设备故障预测")
 
 st.markdown("""
 在这里可以手动输入一台设备的运行参数，系统会加载已保存的随机森林模型，
@@ -303,7 +361,7 @@ if submitted:
         st.warning("请先在上方点击“训练随机森林模型”，保存模型后再进行单条预测。")
 
 
-st.header("7. 项目说明")
+st.header("8. 项目说明")
 
 st.info("""
 当前项目已经形成完整机器学习应用流程：

@@ -5,6 +5,8 @@ import numpy as np
 
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -18,6 +20,29 @@ from sklearn.metrics import (
 MODEL_DIR = "models"
 MODEL_PATH = os.path.join(MODEL_DIR, "random_forest_model.pkl")
 FEATURE_PATH = os.path.join(MODEL_DIR, "feature_names.pkl")
+
+
+def get_data_quality_report(df: pd.DataFrame):
+    """
+    Generate a compact data quality report for the uploaded equipment dataset.
+    """
+
+    report = {
+        "shape": df.shape,
+        "dtypes": df.dtypes.astype(str).to_dict(),
+        "missing_values": df.isnull().sum().to_dict(),
+        "target_distribution": {},
+        "failure_rate": None,
+    }
+
+    target_col = "Machine failure"
+
+    if target_col in df.columns:
+        target_distribution = df[target_col].value_counts().sort_index()
+        report["target_distribution"] = target_distribution.to_dict()
+        report["failure_rate"] = df[target_col].eq(1).mean()
+
+    return report
 
 
 def prepare_data(df: pd.DataFrame):
@@ -111,6 +136,48 @@ def evaluate_model(model, X_test, y_test):
     cm = confusion_matrix(y_test, y_pred)
 
     return metrics, report, cm, y_pred
+
+
+def train_and_compare_models(X_train, X_test, y_train, y_test):
+    """
+    Train multiple baseline models and return their evaluation metrics.
+    """
+
+    models = {
+        "Logistic Regression": LogisticRegression(
+            max_iter=1000,
+            class_weight="balanced",
+            random_state=42
+        ),
+        "Decision Tree": DecisionTreeClassifier(
+            random_state=42,
+            class_weight="balanced"
+        ),
+        "Random Forest": RandomForestClassifier(
+            n_estimators=100,
+            random_state=42,
+            class_weight="balanced"
+        ),
+    }
+
+    results = []
+
+    for model_name, model in models.items():
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+
+        results.append({
+            "Model": model_name,
+            "Accuracy": accuracy_score(y_test, y_pred),
+            "Precision": precision_score(y_test, y_pred, zero_division=0),
+            "Recall": recall_score(y_test, y_pred, zero_division=0),
+            "F1-score": f1_score(y_test, y_pred, zero_division=0),
+        })
+
+    return pd.DataFrame(
+        results,
+        columns=["Model", "Accuracy", "Precision", "Recall", "F1-score"]
+    )
 
 
 def get_feature_importance(model, feature_names):
