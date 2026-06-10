@@ -4,6 +4,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 from ml_core import (
+    batch_predict,
     calculate_threshold_metrics,
     classify_failure_by_threshold,
     get_classification_report_from_predictions,
@@ -397,7 +398,53 @@ if submitted:
         st.warning("请先在上方点击“训练随机森林模型”，保存模型后再进行单条预测。")
 
 
-st.header("8. 项目说明")
+st.header("8. 批量预测与结果下载")
+
+st.markdown("""
+上传新的设备运行数据 CSV 文件后，系统会加载已保存的随机森林模型，
+并基于当前故障判定阈值对每一行设备数据进行故障风险预测。
+""")
+
+batch_file = st.file_uploader(
+    "请上传需要批量预测的设备数据 CSV 文件",
+    type=["csv"],
+    key="batch_prediction_upload"
+)
+
+if batch_file is not None:
+    try:
+        batch_df = pd.read_csv(batch_file)
+        model, feature_names = load_model()
+
+        with st.spinner("正在进行批量预测..."):
+            batch_result_df = batch_predict(
+                batch_df,
+                model,
+                feature_names,
+                threshold=failure_threshold
+            )
+
+        st.success("批量预测完成。")
+        st.write(f"当前故障判定阈值：{failure_threshold:.2f}")
+        st.dataframe(batch_result_df)
+
+        csv_data = batch_result_df.to_csv(index=False).encode("utf-8-sig")
+
+        st.download_button(
+            label="下载批量预测结果 CSV",
+            data=csv_data,
+            file_name="batch_prediction_results.csv",
+            mime="text/csv"
+        )
+
+    except Exception as e:
+        st.error("批量预测失败。")
+        st.write("错误原因：")
+        st.code(str(e))
+        st.warning("请确认已训练并保存随机森林模型，且上传 CSV 包含设备运行特征字段。")
+
+
+st.header("9. 项目说明")
 
 st.info("""
 当前项目已经形成完整机器学习应用流程：

@@ -315,6 +315,60 @@ def build_single_sample(
     return sample_df
 
 
+def prepare_prediction_data(df: pd.DataFrame, feature_names):
+    """
+    Prepare uploaded batch prediction data with the same feature layout as training.
+    """
+
+    data = df.copy()
+
+    drop_cols = ["UDI", "Product ID", "Machine failure"]
+
+    for col in drop_cols:
+        if col in data.columns:
+            data = data.drop(columns=[col])
+
+    if "Type" in data.columns:
+        data = pd.get_dummies(data, columns=["Type"], drop_first=False)
+
+    data = data.select_dtypes(include=[np.number, "bool"])
+
+    for col in feature_names:
+        if col not in data.columns:
+            data[col] = 0
+
+    return data[feature_names]
+
+
+def batch_predict(df: pd.DataFrame, model, feature_names, threshold=0.5):
+    """
+    Predict failure risk for every row in an uploaded CSV file.
+    """
+
+    prediction_data = prepare_prediction_data(df, feature_names)
+
+    if not hasattr(model, "predict_proba"):
+        raise ValueError("当前模型不支持 predict_proba，无法进行批量概率预测。")
+
+    probabilities = model.predict_proba(prediction_data)[:, 1]
+    result_df = df.copy()
+    result_df["failure_probability"] = probabilities
+    result_df["prediction_result"] = [
+        "存在故障风险" if classify_failure_by_threshold(prob, threshold) == 1
+        else "暂未发现明显故障风险"
+        for prob in probabilities
+    ]
+
+    risk_results = [get_risk_level(prob) for prob in probabilities]
+    result_df["risk_level"] = [risk_level for risk_level, _ in risk_results]
+    result_df["maintenance_advice"] = [
+        get_maintenance_advice(risk_level)
+        for risk_level, _ in risk_results
+    ]
+
+    return result_df
+
+
 def predict_single_sample(model, sample_df):
     """
     对单条设备数据进行故障预测。
