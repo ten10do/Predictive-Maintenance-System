@@ -4,11 +4,13 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 from ml_core import (
+    calculate_threshold_metrics,
+    classify_failure_by_threshold,
+    get_classification_report_from_predictions,
     get_data_quality_report,
     prepare_data,
     train_model,
     train_and_compare_models,
-    evaluate_model,
     get_feature_importance,
     save_model,
     load_model,
@@ -25,6 +27,19 @@ DATA_PATH = "data/ai4i2020.csv"
 st.set_page_config(
     page_title="工业设备故障预测系统",
     layout="wide"
+)
+
+failure_threshold = st.sidebar.slider(
+    "故障判定阈值",
+    min_value=0.10,
+    max_value=0.90,
+    value=0.50,
+    step=0.05
+)
+
+st.sidebar.info(
+    "阈值越低，模型越容易判定为故障，更偏向减少漏报；"
+    "阈值越高，模型越谨慎，更偏向减少误报。"
 )
 
 
@@ -185,10 +200,24 @@ if df is not None:
 
             st.success("模型已保存到 models 文件夹。")
 
-            with st.spinner("正在评估模型..."):
-                metrics, report, cm, y_pred = evaluate_model(model, X_test, y_test)
+            with st.spinner("正在按当前阈值评估模型..."):
+                metrics, cm, y_pred, _ = calculate_threshold_metrics(
+                    model,
+                    X_test,
+                    y_test,
+                    threshold=failure_threshold
+                )
+                report = get_classification_report_from_predictions(
+                    y_test,
+                    y_pred
+                )
 
             st.header("6. Random Forest 最终模型评估指标")
+
+            st.info(
+                f"当前评估指标基于故障判定阈值 {failure_threshold:.2f} 计算："
+                "测试集故障概率大于或等于该阈值时判定为故障。"
+            )
 
             col1, col2, col3, col4 = st.columns(4)
 
@@ -322,15 +351,22 @@ if submitted:
         if probability is not None:
             risk_level, risk_text = get_risk_level(probability)
             advice = get_maintenance_advice(risk_level)
+            threshold_prediction = classify_failure_by_threshold(
+                probability,
+                failure_threshold
+            )
         else:
             risk_level = "未知风险"
             risk_text = "模型未返回故障概率。"
             advice = "维护建议：请检查模型配置。"
+            threshold_prediction = prediction
 
-        if prediction == 1:
+        st.write(f"当前故障判定阈值：{failure_threshold:.2f}")
+
+        if threshold_prediction == 1:
             st.error("预测结果：设备存在故障风险")
         else:
-            st.success("预测结果：设备状态正常")
+            st.success("预测结果：暂未发现明显故障风险")
 
         st.metric("故障概率", f"{probability:.2%}" if probability is not None else "未知")
 

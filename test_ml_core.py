@@ -1,8 +1,27 @@
 import unittest
 
+import numpy as np
 import pandas as pd
 
-from ml_core import get_data_quality_report, prepare_data, train_and_compare_models
+from ml_core import (
+    calculate_threshold_metrics,
+    classify_failure_by_threshold,
+    get_classification_report_from_predictions,
+    get_data_quality_report,
+    get_maintenance_advice,
+    get_risk_level,
+    prepare_data,
+    train_and_compare_models,
+)
+
+
+class FixedProbabilityModel:
+    def __init__(self, probabilities):
+        self.probabilities = np.array(probabilities)
+
+    def predict_proba(self, X):
+        failure_probs = self.probabilities[:len(X)]
+        return np.column_stack([1 - failure_probs, failure_probs])
 
 
 class MlCoreUpgradeTests(unittest.TestCase):
@@ -60,6 +79,56 @@ class MlCoreUpgradeTests(unittest.TestCase):
             ["Model", "Accuracy", "Precision", "Recall", "F1-score"],
         )
         self.assertEqual(len(results_df), 3)
+
+    def test_calculate_threshold_metrics_uses_failure_probability_threshold(self):
+        model = FixedProbabilityModel([0.2, 0.4, 0.8, 0.9])
+        X_test = pd.DataFrame({"feature": [1, 2, 3, 4]})
+        y_test = pd.Series([0, 1, 1, 0])
+
+        metrics, cm, y_pred, probabilities = calculate_threshold_metrics(
+            model,
+            X_test,
+            y_test,
+            threshold=0.7,
+        )
+
+        self.assertEqual(y_pred.tolist(), [0, 0, 1, 1])
+        self.assertEqual(probabilities.tolist(), [0.2, 0.4, 0.8, 0.9])
+        self.assertEqual(cm.tolist(), [[1, 1], [1, 1]])
+        self.assertEqual(metrics["accuracy"], 0.5)
+        self.assertEqual(metrics["precision"], 0.5)
+        self.assertEqual(metrics["recall"], 0.5)
+        self.assertEqual(metrics["f1"], 0.5)
+
+    def test_classify_failure_by_threshold_uses_selected_threshold(self):
+        self.assertEqual(classify_failure_by_threshold(0.65, 0.7), 0)
+        self.assertEqual(classify_failure_by_threshold(0.70, 0.7), 1)
+
+    def test_classification_report_can_be_built_from_threshold_predictions(self):
+        report = get_classification_report_from_predictions(
+            pd.Series([0, 1, 1, 0]),
+            np.array([0, 0, 1, 1]),
+        )
+
+        self.assertIn("0", report)
+        self.assertIn("1", report)
+        self.assertIn("accuracy", report)
+
+    def test_risk_level_and_maintenance_advice_use_updated_rules(self):
+        low_level, low_text = get_risk_level(0.29)
+        medium_level, medium_text = get_risk_level(0.30)
+        high_level, high_text = get_risk_level(0.70)
+
+        self.assertEqual(low_level, "低风险")
+        self.assertIn("较稳定", low_text)
+        self.assertEqual(medium_level, "中风险")
+        self.assertIn("潜在异常", medium_text)
+        self.assertEqual(high_level, "高风险")
+        self.assertIn("故障概率较高", high_text)
+
+        self.assertIn("常规巡检", get_maintenance_advice(low_level))
+        self.assertIn("转速、扭矩、温度和工具磨损", get_maintenance_advice(medium_level))
+        self.assertIn("尽快停机检查或安排维护", get_maintenance_advice(high_level))
 
 
 if __name__ == "__main__":
